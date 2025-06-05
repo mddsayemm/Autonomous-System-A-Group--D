@@ -21,7 +21,6 @@ import numpy as np
 import os
 import cv2
 
-
 # ------------------------ CONFIGURATION --------------------------------------
 HOST            = "localhost"
 PORT            = 2000
@@ -36,24 +35,15 @@ PRINT_EVERY_N   = 30           # console frames between logs
 # ------------------------------------------------------------------ STUDENTS --
 def predict_steering(img):
     """
-    Returns random steering for the vehicle should be replaced by the prediciton of the model
-
-    Parameters
-    ----------
-    img : carla.Image
-        The latest RGB camera frame (BGRA byte-buffer).
-
-    Returns
-    -------
-    float
-        Random value in [-1, 1] – the car still drives randomly.
+    Predicts steering value between -1.0 (left) and +1.0 (right)
+    using a trained SVM model from the camera image.
     """
-    # -------------- load the model only once ---------------------------
+
+    # Load the model once
     if not hasattr(predict_steering, "_model"):
         model_path = "groupAsvm.joblib"
         if not os.path.isfile(model_path):
-            print(f"[WARN] SVM file '{model_path}' not found – "
-                  f"only random steering will be used.")
+            print(f"[WARN] SVM file '{model_path}' not found – only random steering will be used.")
             predict_steering._model = None
         else:
             predict_steering._model = joblib.load(model_path)
@@ -62,39 +52,42 @@ def predict_steering(img):
     model = predict_steering._model
     if model is not None:
         try:
+            # Convert CARLA image to BGR format
             img_np = np.frombuffer(img.raw_data, dtype=np.uint8).reshape((img.height, img.width, 4))
             bgr_image = img_np[:, :, :3]
 
-            height = bgr_image.shape[0]
-            cropped = bgr_image[int(height * 0.6):, :, :]
+            height, width, _ = bgr_image.shape
+            bands = [
+                bgr_image[int(height * 0.6):int(height * 0.7), :, :],
+                bgr_image[int(height * 0.7):int(height * 0.8), :, :],
+                bgr_image[int(height * 0.8):, :, :]
+            ]
 
-            hsv = cv2.cvtColor(cropped, cv2.COLOR_BGR2HSV)
             lower_hsv = np.array([70, 50, 50])
             upper_hsv = np.array([90, 255, 255])
-            mask = cv2.inRange(hsv, lower_hsv, upper_hsv)
+            features = []
 
-            indices = np.column_stack(np.where(mask > 0))
-            if len(indices) == 0:
-                avg_x = img.width / 2
-            else:
-                avg_x = np.mean(indices[:, 1])
+            for band in bands:
+                hsv = cv2.cvtColor(band, cv2.COLOR_BGR2HSV)
+                mask = cv2.inRange(hsv, lower_hsv, upper_hsv)
+                indices = np.column_stack(np.where(mask > 0))
+                if len(indices) == 0:
+                    avg_x = width / 2
+                else:
+                    avg_x = np.mean(indices[:, 1])
+                normalized = (avg_x - width / 2) / (width / 2)
+                features.append(normalized)
 
-            center_x = img.width / 2
-            normalized_offset = (avg_x - center_x) / center_x
-            normalized_offset = float(np.clip(normalized_offset, -1.0, 1.0))
-
-            features = np.array([[normalized_offset]])
+            features = np.array([features])  # Shape: (1, 3)
             pred = float(model.predict(features)[0])
         except Exception as e:
             pred = 0.0
             print(f"[ERR] SVM predict failed: {e}")
 
         pred_clipped = max(-1.0, min(1.0, pred))
-        # The output should be then used as return of the function
         print(f"SVM steering prediction: {pred_clipped:.3f}")
         return pred_clipped
 
-    # Random return is just a placeholder and should be replaced by the output from the model
     return random.uniform(-1.0, 1.0)
 # -----------------------------------------------------------------------------
 
@@ -161,8 +154,7 @@ def main():
                 steer = float(max(-1.0, min(1.0, predict_steering(img))))
             else:
                 steer = DEFAULT_STEER  # if no frame yet
-            vehicle.apply_control(carla.VehicleControl(throttle=THROTTLE,
-                                                       steer=steer))
+            vehicle.apply_control(carla.VehicleControl(throttle=THROTTLE, steer=steer))
             time.sleep(0.01)  # ~100 Hz loop
 
     except KeyboardInterrupt:
