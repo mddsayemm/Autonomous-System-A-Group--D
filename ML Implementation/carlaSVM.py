@@ -35,15 +35,24 @@ PRINT_EVERY_N   = 30           # console frames between logs
 # ------------------------------------------------------------------ STUDENTS --
 def predict_steering(img):
     """
-    Predicts steering value between -1.0 (left) and +1.0 (right)
-    using a trained SVM model from the camera image.
-    """
+    Predicts steering angle using a pre-trained SVM model.
 
-    # Load the model once
+    Parameters
+    ----------
+    img : carla.Image
+        The latest RGB camera frame (BGRA byte-buffer).
+
+    Returns
+    -------
+    float
+        Predicted value in [-1, 1] using the SVM model.
+    """
+    # -------------- load the model only once ---------------------------
     if not hasattr(predict_steering, "_model"):
         model_path = "groupAsvm.joblib"
         if not os.path.isfile(model_path):
-            print(f"[WARN] SVM file '{model_path}' not found – only random steering will be used.")
+            print(f"[WARN] SVM file '{model_path}' not found – "
+                  f"only random steering will be used.")
             predict_steering._model = None
         else:
             predict_steering._model = joblib.load(model_path)
@@ -52,33 +61,14 @@ def predict_steering(img):
     model = predict_steering._model
     if model is not None:
         try:
-            # Convert CARLA image to BGR format
             img_np = np.frombuffer(img.raw_data, dtype=np.uint8).reshape((img.height, img.width, 4))
             bgr_image = img_np[:, :, :3]
 
-            height, width, _ = bgr_image.shape
-            bands = [
-                bgr_image[int(height * 0.6):int(height * 0.7), :, :],
-                bgr_image[int(height * 0.7):int(height * 0.8), :, :],
-                bgr_image[int(height * 0.8):, :, :]
-            ]
+            # Resize and flatten the image just like in training
+            resized = cv2.resize(bgr_image, (64, 128))
+            gray = cv2.cvtColor(resized, cv2.COLOR_BGR2GRAY)
+            features = gray.flatten().reshape(1, -1)
 
-            lower_hsv = np.array([70, 50, 50])
-            upper_hsv = np.array([90, 255, 255])
-            features = []
-
-            for band in bands:
-                hsv = cv2.cvtColor(band, cv2.COLOR_BGR2HSV)
-                mask = cv2.inRange(hsv, lower_hsv, upper_hsv)
-                indices = np.column_stack(np.where(mask > 0))
-                if len(indices) == 0:
-                    avg_x = width / 2
-                else:
-                    avg_x = np.mean(indices[:, 1])
-                normalized = (avg_x - width / 2) / (width / 2)
-                features.append(normalized)
-
-            features = np.array([features])  # Shape: (1, 3)
             pred = float(model.predict(features)[0])
         except Exception as e:
             pred = 0.0
@@ -154,7 +144,8 @@ def main():
                 steer = float(max(-1.0, min(1.0, predict_steering(img))))
             else:
                 steer = DEFAULT_STEER  # if no frame yet
-            vehicle.apply_control(carla.VehicleControl(throttle=THROTTLE, steer=steer))
+            vehicle.apply_control(carla.VehicleControl(throttle=THROTTLE,
+                                                       steer=steer))
             time.sleep(0.01)  # ~100 Hz loop
 
     except KeyboardInterrupt:
