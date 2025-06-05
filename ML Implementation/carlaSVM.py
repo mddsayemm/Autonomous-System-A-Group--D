@@ -1,14 +1,8 @@
 #!/usr/bin/env python3
 """
-CARLA template: constant forward speed + steering from student model.
+CARLA template: constant forward speed + steering from SVM model.
 
-Students: put your own logic inside predict_steering(img).
-The function must return a value between -1 and 1.
-
-Dependencies
-------------
-Only CARLA is required.  If your model needs numpy, torch, etc.,
-import them at the top and add them to requirements as needed.
+This version uses a trained SVR model from groupAsvm.joblib.
 """
 
 import carla
@@ -16,73 +10,66 @@ import random
 import time
 import sys
 import math
-import joblib
 import numpy as np
-import os
 import cv2
+import joblib
+import os
 
 # ------------------------ CONFIGURATION --------------------------------------
 HOST            = "localhost"
 PORT            = 2000
-TIMEOUT_S       = 5.0          # seconds
-
-THROTTLE        = 0.5          # constant forward throttle (0..1)
-DEFAULT_STEER   = 0.0          # fallback if no camera frame yet
-PRINT_EVERY_N   = 30           # console frames between logs
+TIMEOUT_S       = 5.0
+THROTTLE        = 0.4
+DEFAULT_STEER   = 0.0
+PRINT_EVERY_N   = 30
+MODEL_PATH      = r"C:\Users\mcsmu\Desktop\Line Following SVM\groupAsvm.joblib"
 # -----------------------------------------------------------------------------
 
 
-# ------------------------------------------------------------------ STUDENTS --
+# ------------------------ HSV Range for Green Detection ----------------------
+LOWER_HSV = np.array([70, 50, 50])
+UPPER_HSV = np.array([90, 255, 255])
+# -----------------------------------------------------------------------------
+
+
+# ------------------------ Load the Trained Model -----------------------------
+model = joblib.load(MODEL_PATH)
+# -----------------------------------------------------------------------------
+
+
+def extract_features(image):
+    """Extract 3-band normalized x-position features from the green line."""
+    hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+    mask = cv2.inRange(hsv, LOWER_HSV, UPPER_HSV)
+    height, width = mask.shape
+
+    bands = [mask[int(height * 0.6):int(height * 0.7), :],
+             mask[int(height * 0.7):int(height * 0.8), :],
+             mask[int(height * 0.8):, :]]
+
+    features = []
+    for band in bands:
+        indices = np.column_stack(np.where(band > 0))
+        if indices.size > 0:
+            avg_x = np.mean(indices[:, 1]) / width * 2 - 1  # Normalize to [-1, 1]
+        else:
+            avg_x = 0.0
+        features.append(avg_x)
+    return features
+
+
 def predict_steering(img):
     """
-    Predicts steering angle using a pre-trained SVM model.
-
-    Parameters
-    ----------
-    img : carla.Image
-        The latest RGB camera frame (BGRA byte-buffer).
-
-    Returns
-    -------
-    float
-        Predicted value in [-1, 1] using the SVM model.
+    Predict steering using the trained SVM model.
+    CARLA image -> OpenCV BGR -> extract 3 features -> model.predict()
     """
-    # -------------- load the model only once ---------------------------
-    if not hasattr(predict_steering, "_model"):
-        model_path = "groupAsvm.joblib"
-        if not os.path.isfile(model_path):
-            print(f"[WARN] SVM file '{model_path}' not found – "
-                  f"only random steering will be used.")
-            predict_steering._model = None
-        else:
-            predict_steering._model = joblib.load(model_path)
-            print(f"[INFO] Loaded SVM from '{model_path}'")
-
-    model = predict_steering._model
-    if model is not None:
-        try:
-            img_np = np.frombuffer(img.raw_data, dtype=np.uint8).reshape((img.height, img.width, 4))
-            bgr_image = img_np[:, :, :3]
-
-            # Resize and flatten the image just like in training
-            resized = cv2.resize(bgr_image, (64, 128))
-            gray = cv2.cvtColor(resized, cv2.COLOR_BGR2GRAY)
-            features = gray.flatten().reshape(1, -1)
-
-            pred = float(model.predict(features)[0])
-        except Exception as e:
-            pred = 0.0
-            print(f"[ERR] SVM predict failed: {e}")
-
-        pred_clipped = max(-1.0, min(1.0, pred))
-        print(f"SVM steering prediction: {pred_clipped:.3f}")
-        return pred_clipped
-
-    return random.uniform(-1.0, 1.0)
-# -----------------------------------------------------------------------------
+    img_array = np.frombuffer(img.raw_data, dtype=np.uint8).reshape((img.height, img.width, 4))
+    bgr = img_array[:, :, :3]
+    features = extract_features(bgr)
+    steering = float(model.predict([features])[0])
+    return max(-1.0, min(1.0, steering))
 
 
-# ---------------------------- UTILITIES --------------------------------------
 def parent_of(actor):
     if hasattr(actor, "get_parent"):
         return actor.get_parent()
@@ -101,13 +88,12 @@ def pick_center_camera(world, vehicle):
             if best is None or delta < best[0]:
                 best = (delta, s)
     return best[1] if best else None
-# -----------------------------------------------------------------------------
 
 
 def main():
     client = carla.Client(HOST, PORT)
     client.set_timeout(TIMEOUT_S)
-    world  = client.get_world()
+    world = client.get_world()
 
     vehicles = world.get_actors().filter("vehicle.*")
     if not vehicles:
@@ -141,12 +127,11 @@ def main():
         while True:
             img = state["latest_img"]
             if img is not None:
-                steer = float(max(-1.0, min(1.0, predict_steering(img))))
+                steer = predict_steering(img)
             else:
-                steer = DEFAULT_STEER  # if no frame yet
-            vehicle.apply_control(carla.VehicleControl(throttle=THROTTLE,
-                                                       steer=steer))
-            time.sleep(0.01)  # ~100 Hz loop
+                steer = DEFAULT_STEER
+            vehicle.apply_control(carla.VehicleControl(throttle=THROTTLE, steer=steer))
+            time.sleep(0.01)  # 100 Hz loop
 
     except KeyboardInterrupt:
         print("\nStopping.")
@@ -154,6 +139,7 @@ def main():
     finally:
         camera.stop()
         vehicle.apply_control(carla.VehicleControl(brake=1.0))
+
 
 if __name__ == "__main__":
     try:
