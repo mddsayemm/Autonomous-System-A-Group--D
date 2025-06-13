@@ -59,7 +59,7 @@ broadcast chan PlatoonMode;
 broadcast chan req_platton_mode;
 broadcast chan CheckAvail;
 broadcast chan ready;
-broadcast chan platooning;
+chan platooning;
 broadcast chan SpaceCheck;
 broadcast chan rejected;
 broadcast chan makespace;
@@ -118,7 +118,7 @@ broadcast chan distance_maintained;
 			<source ref="id10"/>
 			<target ref="id0"/>
 			<label kind="synchronisation" x="-789" y="30">leave_complete?</label>
-			<label kind="assignment" x="-969" y="68">platoon_size = platoon_size - 1</label>
+			<label kind="assignment" x="-969" y="68">platoon_size = PLATOON_SIZE  - 1</label>
 		</transition>
 		<transition id="id12">
 			<source ref="id9"/>
@@ -135,7 +135,7 @@ broadcast chan distance_maintained;
 			<source ref="id5"/>
 			<target ref="id0"/>
 			<label kind="synchronisation" x="-110" y="-17">merge_complete!</label>
-			<label kind="assignment" x="8" y="17">platoon_size = platoon_size + 1</label>
+			<label kind="assignment" x="8" y="17">platoon_size = PLATOON_SIZE  + 1</label>
 		</transition>
 		<transition id="id15">
 			<source ref="id7"/>
@@ -342,6 +342,7 @@ broadcast chan distance_maintained;
 		</location>
 		<location id="id56" x="586" y="-246">
 			<name x="595" y="-229">Spacing</name>
+			<label kind="invariant" x="603" y="-255">join_clock&lt;=20</label>
 		</location>
 		<init ref="id50"/>
 		<transition id="id57">
@@ -406,11 +407,45 @@ Truck2 = FollowerTruck(2);
 Joiner = JoiningTruck(3);
 Leaver = LeavingTruck(2);
 Comm3 = CommManager(3);
-system MainTruck, Truck1, Truck2, Joiner, Leaver,Comm3;</system>
+
+
+system  MainTruck, Truck1, Truck2, Joiner, Leaver,Comm3;</system>
 	<queries>
+		<query>
+			<formula/>
+			<comment/>
+		</query>
 		<query>
 			<formula>A[] not deadlock</formula>
 			<comment/>
+			<result outcome="success" type="quality" timestamp="2025-06-13 03:20:08 +0200">
+			</result>
+		</query>
+		<query>
+			<formula>A[] (Joiner.Spacing imply join_clock &lt;= 20)
+
+
+
+
+</formula>
+			<comment/>
+			<result outcome="success" type="quality" timestamp="2025-06-13 03:20:20 +0200">
+			</result>
+		</query>
+		<query>
+			<formula>A[] (platoon_size &gt;= Max_Platoon_Size imply not Joiner.Autonomous_Driving)
+</formula>
+			<comment/>
+			<result outcome="success" type="quality" timestamp="2025-06-13 03:19:53 +0200">
+			</result>
+		</query>
+		<query>
+			<formula>E&lt;&gt; (platoon_size &gt;= Max_Platoon_Size and Joiner.Autonomous_Driving)
+
+</formula>
+			<comment/>
+			<result outcome="failure" type="quality" timestamp="2025-06-13 03:01:46 +0200">
+			</result>
 		</query>
 	</queries>
 </nta>
