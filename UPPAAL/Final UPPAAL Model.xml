@@ -1,0 +1,539 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE nta PUBLIC '-//Uppaal Team//DTD Flat System 1.6//EN' 'http://www.it.uu.se/research/group/darts/uppaal/flat-1_6.dtd'>
+<nta>
+	<declaration>// Braking Scenario
+broadcast chan EMERGENCY_BRAKE;  // Lead -&gt; Followers brake command
+broadcast chan ACK;             // Followers -&gt; Lead acknowledgment
+broadcast chan RESEND_BRAKE;    // Lead -&gt; Followers retry command
+
+// Joining/Leaving Scenario
+chan merge_request[4];          // TruckID requests to join (e.g., merge_request[3] for Truck3)
+chan merge_accept;              // Lead approves join
+broadcast chan merge_complete;            // Join finalized
+chan leave_request[4];          // TruckID requests to leave
+chan leave_accept;              // Lead approves leave
+chan leave_complete;            // Leave finalized
+chan Laneclear;
+
+// Communication Failure
+broadcast chan comm_loss;       // Signal lost
+broadcast chan comm_restore;    // Signal restored
+broadcast chan comm_restored_ack; // Trucks confirm restoration
+
+// General
+broadcast chan joining_request; // Notify lead of join/leave request
+
+// ===== CLOCKS =====
+clock global_clock;
+clock emergency_timeout;             // Master clock for simulation
+clock ack_timeout_clock;               // Lead truck's timer (for ACK timeout)
+clock follower_clock[4];  // Clocks for Truck1 (id=1) and Truck2 (id=2)
+clock join_clock;               // Timer for joining process
+clock leave_clock;              // Timer for leaving process
+clock comm_clock;               // Timer for communication recovery
+
+// ===== CONSTANTS =====
+const int TIMEOUT = 50;         // 50ms timeout for ACKs (DSRC standard)
+const int MERGE_TIME = 20;       // Time to merge a new truck (ms)
+const int LEAVE_TIME = 15;       // Time to leave platoon (ms)
+const int RECOVERY_TIME = 30;    // Time to restore comms (ms)
+const int PLATOON_SIZE = 3;      // Initial platoon size (Lead + Truck1 + Truck2)
+const int SAFE_DISTANCE = 10;
+const int Max_Platoon_Size =6 ;
+
+
+
+// ===== VARIABLES =====
+int ACK_received = 0;           // Count of received ACKs during braking
+bool brake_active[4] = {false, false, false, false}; // Brake status for each truck
+int distance=13;                   // Distance to obstacle (updated by sensors)
+bool comm_ok[4] = {true, true, true, false}; // Comm status (Truck3 inactive initially)
+int platoon_size = 3;           // Current platoon size
+int merging_id = -1;            // TruckID in merging process (-1 = none)
+int leaving_id = -1;            // TruckID in leaving process (-1 = none)
+
+
+
+//joining 
+
+broadcast chan PlatoonMode;
+broadcast chan req_platton_mode;
+broadcast chan CheckAvail;
+broadcast chan ready;
+chan platooning;
+broadcast chan SpaceCheck;
+broadcast chan rejected;
+broadcast chan makespace;
+broadcast chan space_created;
+broadcast chan joined;
+broadcast chan Platoon_End;
+
+//Safe Distance
+
+clock s;
+
+
+const int ADS = 25;
+int Distance;
+broadcast chan CheckSafeDistance;
+broadcast chan Accelerate;
+broadcast chan  Decelerate;
+broadcast chan DistanceSafe;
+broadcast chan status;
+broadcast chan continuing;
+
+
+
+</declaration>
+	<template>
+		<name x="5" y="5">MainTruck</name>
+		<declaration>// Place local declarations here.
+</declaration>
+		<location id="id0" x="-501" y="-110">
+			<name x="-526" y="-153">Driving</name>
+		</location>
+		<location id="id1" x="-51" y="-102">
+			<name x="-127" y="-85">ObstacleDetected</name>
+		</location>
+		<location id="id2" x="-93" y="144">
+			<name x="-103" y="110">ManagingJoin</name>
+		</location>
+		<location id="id3" x="323" y="-102">
+			<name x="313" y="-136">AwaitingACK</name>
+		</location>
+		<location id="id4" x="722" y="-102">
+			<name x="688" y="-68">Braking</name>
+		</location>
+		<location id="id5" x="289" y="144">
+			<name x="263" y="161">AwaitingMergeDone</name>
+		</location>
+		<location id="id6" x="-501" y="-399">
+			<name x="-511" y="-433">CommunicationLost</name>
+		</location>
+		<location id="id7" x="-756" y="-399">
+			<name x="-766" y="-442">MonitoringComms</name>
+		</location>
+		<location id="id8" x="-756" y="-110">
+			<name x="-884" y="-85">AwaitingRestoreAck</name>
+		</location>
+		<location id="id9" x="-510" y="204">
+			<name x="-544" y="238">Managingleave</name>
+		</location>
+		<location id="id10" x="-807" y="204">
+			<name x="-884" y="229">Awaitingleftone</name>
+		</location>
+		<init ref="id0"/>
+		<transition id="id11">
+			<source ref="id10"/>
+			<target ref="id0"/>
+			<label kind="synchronisation" x="-789" y="30">leave_complete?</label>
+			<label kind="assignment" x="-969" y="68">platoon_size = PLATOON_SIZE  - 1</label>
+		</transition>
+		<transition id="id12">
+			<source ref="id9"/>
+			<target ref="id10"/>
+			<label kind="synchronisation" x="-688" y="229">leave_accept!</label>
+		</transition>
+		<transition id="id13">
+			<source ref="id0"/>
+			<target ref="id9"/>
+			<label kind="synchronisation" x="-505" y="30">leave_request[2]?</label>
+			<label kind="assignment" x="-505" y="47">leaving_id = 2</label>
+		</transition>
+		<transition id="id14">
+			<source ref="id5"/>
+			<target ref="id0"/>
+			<label kind="synchronisation" x="-110" y="-17">merge_complete!</label>
+			<label kind="assignment" x="8" y="17">platoon_size = PLATOON_SIZE  + 1</label>
+		</transition>
+		<transition id="id15">
+			<source ref="id7"/>
+			<target ref="id8"/>
+			<label kind="synchronisation" x="-892" y="-255">comm_restored_ack?</label>
+		</transition>
+		<transition id="id16">
+			<source ref="id8"/>
+			<target ref="id0"/>
+		</transition>
+		<transition id="id17">
+			<source ref="id4"/>
+			<target ref="id0"/>
+			<nail x="714" y="-620"/>
+		</transition>
+		<transition id="id18">
+			<source ref="id6"/>
+			<target ref="id7"/>
+			<label kind="synchronisation" x="-688" y="-382">comm_restore?</label>
+		</transition>
+		<transition id="id19">
+			<source ref="id0"/>
+			<target ref="id6"/>
+			<label kind="synchronisation" x="-484" y="-272">comm_loss!</label>
+		</transition>
+		<transition id="id20">
+			<source ref="id2"/>
+			<target ref="id5"/>
+			<label kind="synchronisation" x="59" y="144">req_platton_mode!</label>
+		</transition>
+		<transition id="id21">
+			<source ref="id3"/>
+			<target ref="id1"/>
+			<label kind="guard" x="17" y="-280">emergency_timeout &gt;= TIMEOUT 
+&amp;&amp; ACK_received &lt; PLATOON_SIZE - 1 
+&amp;&amp; !brake_active[0]</label>
+			<label kind="synchronisation" x="93" y="-170">RESEND_BRAKE!</label>
+			<label kind="assignment" x="59" y="-212">emergency_timeout = 0</label>
+			<nail x="323" y="-178"/>
+			<nail x="-51" y="-178"/>
+		</transition>
+		<transition id="id22">
+			<source ref="id0"/>
+			<target ref="id2"/>
+			<label kind="synchronisation" x="-399" y="-17">merge_request[3]?</label>
+			<label kind="assignment" x="-382" y="8">merging_id = 3</label>
+		</transition>
+		<transition id="id23">
+			<source ref="id3"/>
+			<target ref="id4"/>
+			<label kind="synchronisation" x="518" y="-85">ACK?</label>
+		</transition>
+		<transition id="id24">
+			<source ref="id1"/>
+			<target ref="id3"/>
+			<label kind="synchronisation" x="76" y="-93">EMERGENCY_BRAKE!</label>
+			<label kind="assignment" x="85" y="-127">ACK_received = 0</label>
+		</transition>
+		<transition id="id25">
+			<source ref="id0"/>
+			<target ref="id1"/>
+			<label kind="guard" x="-374" y="-136">distance &lt; SAFE_DISTANCE</label>
+			<label kind="assignment" x="-365" y="-102">emergency_timeout = 0</label>
+		</transition>
+	</template>
+	<template>
+		<name>FollowerTruck</name>
+		<parameter>int id</parameter>
+		<declaration>
+</declaration>
+		<location id="id26" x="-909" y="-297">
+			<name x="-943" y="-331">Cruising</name>
+		</location>
+		<location id="id27" x="-510" y="-297">
+			<name x="-544" y="-331">ReceivedBrake</name>
+		</location>
+		<location id="id28" x="-127" y="-297">
+			<name x="-137" y="-331">ACKSent</name>
+		</location>
+		<location id="id29" x="-127" y="-51">
+			<name x="-153" y="-34">Braking</name>
+		</location>
+		<init ref="id26"/>
+		<transition id="id30">
+			<source ref="id29"/>
+			<target ref="id26"/>
+		</transition>
+		<transition id="id31">
+			<source ref="id28"/>
+			<target ref="id29"/>
+			<label kind="guard" x="-374" y="-204">follower_clock[id] &lt;= TIMEOUT</label>
+		</transition>
+		<transition id="id32">
+			<source ref="id27"/>
+			<target ref="id28"/>
+			<label kind="synchronisation" x="-323" y="-323">ACK!</label>
+		</transition>
+		<transition id="id33">
+			<source ref="id26"/>
+			<target ref="id27"/>
+			<label kind="synchronisation" x="-773" y="-331">EMERGENCY_BRAKE?</label>
+			<label kind="assignment" x="-799" y="-289">follower_clock[id] = 0</label>
+		</transition>
+	</template>
+	<template>
+		<name>LeavingTruck</name>
+		<parameter>int id</parameter>
+		<location id="id34" x="-620" y="-221">
+			<name x="-630" y="-255">Active</name>
+		</location>
+		<location id="id35" x="-110" y="-212">
+			<name x="-144" y="-246">Requesting</name>
+		</location>
+		<location id="id36" x="272" y="-212">
+			<name x="262" y="-246">Leaving</name>
+		</location>
+		<location id="id37" x="-195" y="144">
+			<name x="-195" y="170">Left</name>
+		</location>
+		<init ref="id34"/>
+		<transition id="id38">
+			<source ref="id37"/>
+			<target ref="id34"/>
+		</transition>
+		<transition id="id39">
+			<source ref="id36"/>
+			<target ref="id37"/>
+			<label kind="guard" x="-177" y="-68">leave_clock &gt;= LEAVE_TIME</label>
+			<label kind="synchronisation" x="-177" y="-51">leave_complete!</label>
+		</transition>
+		<transition id="id40">
+			<source ref="id35"/>
+			<target ref="id36"/>
+			<label kind="synchronisation" x="17" y="-238">leave_accept?</label>
+		</transition>
+		<transition id="id41">
+			<source ref="id34"/>
+			<target ref="id35"/>
+			<label kind="synchronisation" x="-442" y="-246">leave_request[id]!</label>
+			<label kind="assignment" x="-442" y="-204">leave_clock = 0</label>
+		</transition>
+	</template>
+	<template>
+		<name>CommManager</name>
+		<parameter>int id</parameter>
+		<location id="id42" x="-586" y="-59">
+			<name x="-629" y="-102">Monitoring</name>
+		</location>
+		<location id="id43" x="-204" y="-59">
+			<name x="-214" y="-93">LostComm</name>
+		</location>
+		<location id="id44" x="229" y="-59">
+			<name x="219" y="-93">RestoringComm</name>
+		</location>
+		<location id="id45" x="-195" y="212">
+			<name x="-229" y="246">CommRestored</name>
+		</location>
+		<init ref="id42"/>
+		<transition id="id46">
+			<source ref="id45"/>
+			<target ref="id43"/>
+			<label kind="synchronisation" x="-272" y="85">comm_loss?</label>
+		</transition>
+		<transition id="id47">
+			<source ref="id44"/>
+			<target ref="id45"/>
+			<label kind="synchronisation" x="76" y="102">comm_restored_ack!</label>
+		</transition>
+		<transition id="id48">
+			<source ref="id43"/>
+			<target ref="id44"/>
+			<label kind="guard" x="-76" y="-110">comm_clock &gt;= RECOVERY_TIME</label>
+			<label kind="synchronisation" x="-25" y="-85">comm_restore!</label>
+			<label kind="assignment" x="-59" y="-51">comm_ok[id] = true</label>
+		</transition>
+		<transition id="id49">
+			<source ref="id42"/>
+			<target ref="id43"/>
+			<label kind="guard" x="-416" y="-102">!comm_ok[id]</label>
+			<label kind="synchronisation" x="-408" y="-85">comm_loss?</label>
+			<label kind="assignment" x="-433" y="-51">comm_clock = 0</label>
+		</transition>
+	</template>
+	<template>
+		<name>JoiningTruck</name>
+		<parameter>int id</parameter>
+		<location id="id50" x="-340" y="-178">
+			<name x="-391" y="-221">Joining_Driver</name>
+		</location>
+		<location id="id51" x="-42" y="-178">
+			<name x="-76" y="-153">Joining_Truck</name>
+		</location>
+		<location id="id52" x="187" y="-169">
+			<name x="153" y="-152">MainTruck</name>
+		</location>
+		<location id="id53" x="187" y="42">
+			<name x="162" y="59">Control</name>
+		</location>
+		<location id="id54" x="586" y="34">
+			<name x="527" y="51">FollowerTruck</name>
+		</location>
+		<location id="id55" x="399" y="-357">
+			<name x="331" y="-391">Autonomous_Driving</name>
+		</location>
+		<location id="id56" x="586" y="-246">
+			<name x="595" y="-229">Spacing</name>
+			<label kind="invariant" x="603" y="-255">join_clock&lt;=20</label>
+		</location>
+		<init ref="id50"/>
+		<transition id="id57">
+			<source ref="id55"/>
+			<target ref="id50"/>
+			<label kind="synchronisation" x="-8" y="-382">Platoon_End!</label>
+			<nail x="-340" y="-365"/>
+		</transition>
+		<transition id="id58">
+			<source ref="id56"/>
+			<target ref="id55"/>
+			<label kind="synchronisation" x="501" y="-314">merge_complete!</label>
+			<label kind="assignment" x="340" y="-323">join_clock =0</label>
+		</transition>
+		<transition id="id59">
+			<source ref="id54"/>
+			<target ref="id56"/>
+			<label kind="guard" x="595" y="-127">join_clock&lt;=20</label>
+			<label kind="synchronisation" x="595" y="-51">makespace!</label>
+		</transition>
+		<transition id="id60">
+			<source ref="id53"/>
+			<target ref="id50"/>
+			<label kind="guard" x="-263" y="8">PLATOON_SIZE&gt;= Max_Platoon_Size</label>
+			<label kind="synchronisation" x="-238" y="42">rejected!</label>
+			<nail x="-340" y="42"/>
+		</transition>
+		<transition id="id61">
+			<source ref="id53"/>
+			<target ref="id54"/>
+			<label kind="guard" x="238" y="42">PLATOON_SIZE&lt; Max_Platoon_Size</label>
+			<label kind="synchronisation" x="297" y="8">SpaceCheck!</label>
+		</transition>
+		<transition id="id62">
+			<source ref="id52"/>
+			<target ref="id52"/>
+			<label kind="guard" x="127" y="-280">join_clock&lt;=2</label>
+			<label kind="synchronisation" x="153" y="-237">platooning?</label>
+			<nail x="297" y="-246"/>
+			<nail x="93" y="-246"/>
+		</transition>
+		<transition id="id63">
+			<source ref="id52"/>
+			<target ref="id53"/>
+			<label kind="synchronisation" x="204" y="-85">CheckAvail!</label>
+			<label kind="assignment" x="76" y="-85">join_clock=0</label>
+		</transition>
+		<transition id="id64">
+			<source ref="id51"/>
+			<target ref="id52"/>
+			<label kind="synchronisation" x="-8" y="-221">req_platton_mode!</label>
+		</transition>
+		<transition id="id65">
+			<source ref="id50"/>
+			<target ref="id51"/>
+			<label kind="synchronisation" x="-229" y="-204">merge_request[id]!</label>
+			<label kind="assignment" x="-212" y="-170">join_clock = 0</label>
+		</transition>
+	</template>
+	<template>
+		<name>SafeDistance</name>
+		<location id="id66" x="-3570" y="-3799">
+			<name x="-3630" y="-3833">AutonomousDriving</name>
+		</location>
+		<location id="id67" x="-3230" y="-3799">
+			<name x="-3273" y="-3833">DistanceCheck</name>
+		</location>
+		<location id="id68" x="-3119" y="-3629">
+			<name x="-3170" y="-3612">DecreaseSpeed</name>
+		</location>
+		<location id="id69" x="-3791" y="-3799">
+		</location>
+		<location id="id70" x="-3349" y="-3629">
+			<name x="-3400" y="-3612">IncreaseSpeed</name>
+		</location>
+		<location id="id71" x="-3213" y="-3476">
+			<name x="-3264" y="-3459">SafeDistance</name>
+		</location>
+		<init ref="id69"/>
+		<transition id="id72">
+			<source ref="id70"/>
+			<target ref="id70"/>
+			<label kind="guard" x="-3519" y="-3646">Distance&gt;ADS</label>
+			<nail x="-3400" y="-3553"/>
+			<nail x="-3400" y="-3689"/>
+		</transition>
+		<transition id="id73">
+			<source ref="id68"/>
+			<target ref="id68"/>
+			<label kind="guard" x="-3085" y="-3655">Distance&lt;ADS</label>
+			<nail x="-3068" y="-3723"/>
+			<nail x="-3068" y="-3570"/>
+		</transition>
+		<transition id="id74">
+			<source ref="id70"/>
+			<target ref="id71"/>
+			<label kind="synchronisation" x="-3349" y="-3561">DistanceSafe!</label>
+		</transition>
+		<transition id="id75">
+			<source ref="id71"/>
+			<target ref="id66"/>
+			<label kind="synchronisation" x="-3612" y="-3578">continuing!</label>
+			<label kind="assignment" x="-3544" y="-3468">Distance = ADS, s=0</label>
+			<nail x="-3570" y="-3476"/>
+		</transition>
+		<transition id="id76">
+			<source ref="id68"/>
+			<target ref="id71"/>
+			<label kind="synchronisation" x="-3213" y="-3553">DistanceSafe!</label>
+		</transition>
+		<transition id="id77">
+			<source ref="id67"/>
+			<target ref="id70"/>
+			<label kind="guard" x="-3315" y="-3731">s&lt;3</label>
+			<label kind="synchronisation" x="-3366" y="-3706">Accelerate!</label>
+		</transition>
+		<transition id="id78">
+			<source ref="id69"/>
+			<target ref="id66"/>
+			<label kind="synchronisation" x="-3765" y="-3825">merge_complete!</label>
+			<label kind="assignment" x="-3698" y="-3799">s=0</label>
+		</transition>
+		<transition id="id79">
+			<source ref="id67"/>
+			<target ref="id68"/>
+			<label kind="guard" x="-3179" y="-3740">s&lt;3</label>
+			<label kind="synchronisation" x="-3213" y="-3723">Decelerate!</label>
+			<nail x="-3222" y="-3791"/>
+			<nail x="-3222" y="-3784"/>
+		</transition>
+		<transition id="id80">
+			<source ref="id66"/>
+			<target ref="id67"/>
+			<label kind="guard" x="-3307" y="-3824">s&lt;1</label>
+			<label kind="synchronisation" x="-3477" y="-3824">CheckSafeDistance!</label>
+			<label kind="assignment" x="-3400" y="-3799">s=0</label>
+		</transition>
+	</template>
+	<system>Truck1 = FollowerTruck(1);
+Truck2 = FollowerTruck(2);
+Joiner = JoiningTruck(3);
+Leaver = LeavingTruck(2);
+Comm3 = CommManager(3);
+
+
+system  MainTruck, Truck1, Truck2, Joiner, Leaver,Comm3,SafeDistance;</system>
+	<queries>
+		<query>
+			<formula/>
+			<comment/>
+		</query>
+		<query>
+			<formula>A[] not deadlock</formula>
+			<comment/>
+			<result outcome="success" type="quality" timestamp="2025-06-25 22:48:26 +0200">
+			</result>
+		</query>
+		<query>
+			<formula>A[] (Joiner.Spacing imply join_clock &lt;= 20)
+
+
+
+
+</formula>
+			<comment/>
+			<result outcome="success" type="quality" timestamp="2025-06-13 03:20:20 +0200">
+			</result>
+		</query>
+		<query>
+			<formula>A[] (platoon_size &gt;= Max_Platoon_Size imply not Joiner.Autonomous_Driving)
+</formula>
+			<comment/>
+			<result outcome="success" type="quality" timestamp="2025-06-13 03:19:53 +0200">
+			</result>
+		</query>
+		<query>
+			<formula>E&lt;&gt; (platoon_size &gt;= Max_Platoon_Size and Joiner.Autonomous_Driving)
+
+</formula>
+			<comment/>
+			<result outcome="failure" type="quality" timestamp="2025-06-13 03:01:46 +0200">
+			</result>
+		</query>
+	</queries>
+</nta>
